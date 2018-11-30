@@ -1,6 +1,4 @@
-import helpers
 import time
-import json
 
 class Solver:
     def __init__(self, G, seeds, k, **params):

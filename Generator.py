@@ -6,32 +6,24 @@ import time
 import os
 import argparse
 import numpy as np
-import scipy.io
-import logging
+import hashlib
 from scipy.sparse import csr_matrix
-sys.path.append(os.path.join(os.environ['PHD_ROOT'], 'imin', 'src'))
-sys.path.append(os.path.join(os.environ['PHD_ROOT'], 'imin', 'scripts'))
-import helpers
-from FileManager import *
 
 class Generator:
     def __init__(self, params):
         self.params = params
         self.generators = {
             'powerlaw_cluster': lambda: nx.powerlaw_cluster_graph(params["n"], params["m"], params["p"]),
-            'stanford': lambda: self.get_stanford_graph(),
-            'gnutella': lambda: self.get_gnutella_graph(),
             'grid': lambda: nx.convert_node_labels_to_integers(nx.grid_2d_graph(params['n'], params['n'])),
             'path': lambda: nx.path_graph(params["n"]),
             'binomial': lambda: nx.fast_gnp_random_graph(params['n'], params['p']),
             'watts_strogatz': lambda: nx.watts_strogatz_graph(params['n'], params['k'], params['p']),
             'karate': lambda: nx.karate_club_graph(),
-            'vk': lambda: self.get_vk_graph(),
             'gaussian_random_partition': lambda: nx.gaussian_random_partition_graph(params['n'], params['s'], params['v'], params['p_in'], params['p_out'])
         }
 
     def gen_graph_id(self):
-        return str(helpers.get_static_hash(str(int(time.time())) + str(random.randint(10000, 99999)) + "_".join([str(self.params[p]) for p in self.params])))
+        return str(self.get_static_hash(str(int(time.time())) + str(random.randint(10000, 99999)) + "_".join([str(self.params[p]) for p in self.params])))
 
     def generate(self, number_of_graphs=1):
         for i in range(number_of_graphs):
@@ -80,49 +72,10 @@ class Generator:
                         dG[e[1]][e[0]][key] = G[e[0]][e[1]][key]
         return dG
 
-    def get_stanford_graph(self):
-        mat = scipy.io.loadmat(os.path.join(os.environ['ALLDATA_PATH'], 'imin', 'wb-cs-stanford.mat'))
-        sparse = mat['Problem'][0][0][2]
-        m = csr_matrix(sparse)
-        g = nx.DiGraph()
-        G = nx.from_numpy_matrix(m.toarray(), create_using=g)
-        return G
-        # g = G
-        # g = G.to_undirected() -- mistake
-        # nodeset = []
-        # for g1 in nx.connected_components(g):
-        #     if len(g1) > 1000:
-        #         nodeset = g1
-        #         break
-        # return G.subgraph(nodeset).copy()
-
-    def get_gnutella_graph(self):
-        edges = []
-        with open(os.path.join(os.environ['ALLDATA_PATH'], 'imin', 'p2p-Gnutella31.txt')) as f:
-            nodes, edge_count = f.readline().split()
-            nodes = int(nodes)
-            edge_count = int(edge_count)
-            for line in f:
-                edges.append((int(line.split()[0]), int(line.split()[1])))
-        assert(len(edges) == edge_count)
-        G = nx.DiGraph()
-        G.add_nodes_from(range(nodes))
-        G.add_edges_from(edges)
-        return G
-
-    def get_vk_graph(self):
-        G = nx.read_gpickle(os.path.join(os.environ['ALLDATA_PATH'], 'imin', 'vk_graph_cleaned.pkl'))
-        return G
-
     @staticmethod
     def analyze_graph(G):
         G.graph['directed'] = nx.is_directed(G)
         G_und = G.to_undirected()
-        # if G.graph['directed']:
-        #     G.graph['weakly_connected_components'] = nx.number_weakly_connected_components(G)
-        #     G.graph['largest_weak_component'] = max(nx.weakly_connected_components(G), key=len)
-        #     G.graph['strongly_connected_components'] = nx.number_strongly_connected_components(G)
-        # else:
         G.graph['connected_components'] = nx.number_connected_components(G_und)
         G.graph['largest_component'] = len(max(nx.connected_components(G_und), key=len))
 
@@ -136,3 +89,38 @@ class Generator:
         G.graph['std_degree'] = np.std(degrees)
         G.graph['median_degree'] = np.median(degrees)
         logging.info("Graph ID {}: degrees analyzed.".format(G.graph['graph_id']))
+
+    @staticmethod
+    def get_static_hash(string):
+        h = int(hashlib.md5(string.encode('utf-8')).hexdigest(), 16)
+        return h
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Generate graph with seeds")
+    parser.add_argument("graph_type", type=str)
+    parser.add_argument("graph_outfile", type=str)
+    parser.add_argument("seed_outfile", type=str)
+    parser.add_argument("-s", "--number_of_seeds", type=str, default=1)
+    parser.add_argument("-b", "--both_directions", type=int, default=1)
+    parser.add_argument("-w", "--weight_scale", type=float, default=0.3)
+    parser.add_argument("-p", "--other_params", type=str, nargs="*")
+
+    args = parser.parse_args()
+    other_params = {"graph_type": args.graph_type,
+                    "both_directions": args.both_directions,
+                    "weight_scale": args.weight_scale,
+                    "random_weight": 1}
+    if args.other_params:
+        for i in range(int(len(args.other_params)/2)):
+            if args.other_params[2*i+1].isdigit():
+                other_params[args.other_params[2*i]] = int(args.other_params[2*i+1])
+            else:
+                other_params[args.other_params[2*i]] = args.other_params[2*i+1]
+    z = dict(other_params)
+    gen = Generator(z)
+    G = next(gen.generate())
+    nx.write_gpickle(G, args.graph_outfile)
+    n = args.number_of_seeds
+    seeds = np.random.choice([node for node in G.nodes()], n, replace=False)
+    np.savetxt(args.seed_outfile, seeds, fmt="%1u")
+    print("Done.")
