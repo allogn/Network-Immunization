@@ -100,7 +100,7 @@ if __name__ == "__main__":
     parser.add_argument("graph_type", type=str)
     parser.add_argument("graph_outfile", type=str)
     parser.add_argument("seed_outfile", type=str)
-    parser.add_argument("-s", "--number_of_seeds", type=str, default=1)
+    parser.add_argument("-s", "--number_of_seeds", type=int, default=1)
     parser.add_argument("-b", "--both_directions", type=int, default=1)
     parser.add_argument("-w", "--weight_scale", type=float, default=0.3)
     parser.add_argument("-p", "--other_params", type=str, nargs="*")
